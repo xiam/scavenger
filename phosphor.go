@@ -24,22 +24,24 @@
 package main
 
 import (
-	"os"
-	"log"
+	"crypto"
 	"flag"
 	"fmt"
 	"github.com/gosexy/canvas"
 	"github.com/gosexy/checksum"
-	"path"
-	"crypto"
-	"strings"
 	"io"
+	"log"
+	"os"
+	"path"
+	"strings"
 )
 
 const PS = string(os.PathSeparator)
 
 var flagFrom = flag.String("from", "", "Photos source directory.")
 var flagDest = flag.String("to", "", "Photos destination directory.")
+var flagMove = flag.Bool("move", false, "Delete original file after copying.")
+var flagDryRun = flag.Bool("dry-run", false, "Just prints what would be done without actually doing it.")
 
 func verifyDirectory(name string) error {
 	stat, err := os.Stat(name)
@@ -52,25 +54,34 @@ func verifyDirectory(name string) error {
 	return nil
 }
 
+func Copy(src string, dst string) error {
+	var err error
+
+	input, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+
+	output, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer output.Close()
+
+	_, err = io.Copy(output, input)
+
+	return err
+}
+
 func Move(src string, dst string) error {
 	var err error
 
 	err = os.Rename(src, dst)
 
 	if err != nil {
-		input, err := os.Open(src)
-		if err != nil {
-			return err
-		}
-		defer input.Close()
 
-		output, err := os.Create(dst)
-		if err != nil {
-			return err
-		}
-		defer output.Close()
-
-		_, err = io.Copy(output, input)
+		err = Copy(src, dst)
 
 		if err != nil {
 			return err
@@ -106,9 +117,24 @@ func Import(name string, dest string) {
 			_, err := os.Stat(rename)
 
 			if err != nil {
-				os.MkdirAll(path.Dir(rename), os.ModeDir | 0750)
-				err = Move(name, rename)
-				log.Printf("Moving file: %s -> %s\n", name, rename)
+				if *flagDryRun == false {
+					err = os.MkdirAll(path.Dir(rename), os.ModeDir|0750)
+					if err != nil {
+						panic(err)
+					}
+				}
+				err = nil
+				if *flagMove == true {
+					log.Printf("Moving file: %s -> %s\n", name, rename)
+					if *flagDryRun == false {
+						err = Move(name, rename)
+					}
+				} else {
+					log.Printf("Copying file: %s -> %s\n", name, rename)
+					if *flagDryRun == false {
+						err = Copy(name, rename)
+					}
+				}
 				if err != nil {
 					panic(err)
 				}
@@ -170,7 +196,7 @@ func main() {
 	flag.Parse()
 
 	if *flagFrom == "" || *flagDest == "" {
-		fmt.Printf("Sample usage: phosphor -from /run/media/me/usb -to ~/Photos\n")
+		fmt.Printf("Sample usage: phosphor -from /run/media/me/usb/DCIM -to ~/Photos -dry-run")
 		flag.PrintDefaults()
 	} else {
 		var err error
