@@ -196,7 +196,7 @@ func main() {
 	flag.Parse()
 
 	if *flagFrom == "" || *flagDest == "" {
-		fmt.Printf("Sample usage: phosphor -from /run/media/me/usb/DCIM -to ~/Photos -dry-run")
+		fmt.Printf("Sample usage: phosphor -from /run/media/me/usb/DCIM -to ~/Photos -dry-run\n")
 		flag.PrintDefaults()
 	} else {
 		var err error
