@@ -27,16 +27,23 @@ import (
 	"crypto"
 	"flag"
 	"fmt"
-	"github.com/gosexy/canvas"
 	"github.com/gosexy/checksum"
+	"github.com/gosexy/exif"
+	"github.com/gosexy/to"
 	"io"
 	"log"
 	"os"
 	"path"
+	"regexp"
 	"strings"
+	"time"
 )
 
 const PS = string(os.PathSeparator)
+
+var dateTimeFields = []string{
+	"Date and Time (Original)",
+}
 
 var flagFrom = flag.String("from", "", "Photos source directory.")
 var flagDest = flag.String("to", "", "Photos destination directory.")
@@ -95,24 +102,50 @@ func Move(src string, dst string) error {
 
 func Import(name string, dest string) {
 
-	img := canvas.New()
+	ex := exif.New()
 
-	if img.Open(name) == true {
+	re, _ := regexp.Compile(`(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})`)
 
-		defer img.Destroy()
+	err := ex.Open(name)
 
-		meta := img.Metadata()
+	if err == nil {
 
-		if meta["exif:DateTimeOriginal"] != "" {
+		var taken string
 
-			datetime := strings.Split(meta["exif:DateTimeOriginal"], " ")
+		for _, field := range dateTimeFields {
+			if ex.Tags[field] != "" {
+				taken = ex.Tags[field]
+				break
+			}
+		}
 
-			date := strings.Split(datetime[0], ":")
-			time := strings.Split(datetime[1], ":")
+		if taken != "" {
+
+			all := re.FindAllStringSubmatch(taken, -1)
+
+			timeTaken := time.Date(
+				to.Int(all[0][1]),
+				time.Month(to.Int(all[0][2])),
+				to.Int(all[0][3]),
+				to.Int(all[0][4]),
+				to.Int(all[0][5]),
+				to.Int(all[0][6]),
+				0,
+				time.UTC,
+			)
 
 			hash := checksum.File(name, crypto.SHA1)
 
-			rename := dest + PS + strings.Join(date, PS) + PS + strings.Join(time, "") + strings.ToUpper(hash[0:5]) + strings.ToLower(path.Ext(name))
+			rename := strings.Join(
+				[]string{
+					dest,
+					to.String(timeTaken.Year()),
+					to.String(timeTaken.Month()),
+					fmt.Sprintf("%02d-%s", timeTaken.Day(), timeTaken.Weekday()),
+					fmt.Sprintf("%02d%02d%02d-%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:4])),
+				},
+				PS,
+			)
 
 			_, err := os.Stat(rename)
 
