@@ -35,6 +35,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -45,10 +46,15 @@ var dateTimeFields = []string{
 	"Date and Time (Original)",
 }
 
+var pcount = 0
+
+var ok chan int
+
 var flagFrom = flag.String("from", "", "Photos source directory.")
 var flagDest = flag.String("to", "", "Photos destination directory.")
 var flagMove = flag.Bool("move", false, "Delete original file after copying.")
 var flagDryRun = flag.Bool("dry-run", false, "Just prints what would be done without actually doing it.")
+var flagMaxProcs = flag.Int("max-procs", runtime.NumCPU(), "The maximum number of tasks run at the same time.")
 
 func verifyDirectory(name string) error {
 	stat, err := os.Stat(name)
@@ -102,6 +108,10 @@ func Move(src string, dst string) error {
 
 func Import(name string, dest string) {
 
+	defer func() {
+		ok <- 1
+	}()
+
 	ex := exif.New()
 
 	re, _ := regexp.Compile(`(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})`)
@@ -142,7 +152,7 @@ func Import(name string, dest string) {
 					to.String(timeTaken.Year()),
 					to.String(timeTaken.Month()),
 					fmt.Sprintf("%02d-%s", timeTaken.Day(), timeTaken.Weekday()),
-					fmt.Sprintf("%02d%02d%02d-%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:4])),
+					fmt.Sprintf("%02d%02d%02d-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:4]), strings.ToLower(path.Ext(name))),
 				},
 				PS,
 			)
@@ -216,7 +226,16 @@ func Scandir(dirname string, dest string) error {
 		if file.IsDir() == true {
 			Scandir(name, dest)
 		} else {
-			Import(name, dest)
+			go Import(name, dest)
+			pcount++
+		}
+
+		if pcount >= *flagMaxProcs {
+			// Waiting for all tasks to finish
+			for i := 0; i < pcount; i++ {
+				<-ok
+			}
+			pcount = 0
 		}
 
 	}
@@ -233,6 +252,8 @@ func main() {
 		flag.PrintDefaults()
 	} else {
 		var err error
+
+		ok = make(chan int, *flagMaxProcs)
 
 		err = verifyDirectory(*flagFrom)
 		if err != nil {
