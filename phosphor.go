@@ -150,7 +150,7 @@ func Import(name string, dest string) {
 				[]string{
 					dest,
 					to.String(timeTaken.Year()),
-					to.String(timeTaken.Month()),
+					fmt.Sprintf("%02d-%s", timeTaken.Month(), timeTaken.Month()),
 					fmt.Sprintf("%02d-%s", timeTaken.Day(), timeTaken.Weekday()),
 					fmt.Sprintf("%02d%02d%02d-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:4]), strings.ToLower(path.Ext(name))),
 				},
@@ -226,16 +226,14 @@ func Scandir(dirname string, dest string) error {
 		if file.IsDir() == true {
 			Scandir(name, dest)
 		} else {
-			go Import(name, dest)
-			pcount++
-		}
-
-		if pcount >= *flagMaxProcs {
-			// Waiting for all tasks to finish
-			for i := 0; i < pcount; i++ {
+			if pcount >= *flagMaxProcs {
+				// Waiting for one task to finish
 				<-ok
+				pcount--
 			}
-			pcount = 0
+			go Import(name, dest)
+			// Task count
+			pcount++
 		}
 
 	}
@@ -248,7 +246,7 @@ func main() {
 	flag.Parse()
 
 	if *flagFrom == "" || *flagDest == "" {
-		fmt.Printf("Sample usage: phosphor -from /run/media/me/usb/DCIM -to ~/Photos -dry-run\n")
+		fmt.Printf("Sample usage: phosphor -from /media/usb/DCIM -to ~/Photos -dry-run\n")
 		flag.PrintDefaults()
 	} else {
 		var err error
