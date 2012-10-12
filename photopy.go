@@ -50,11 +50,16 @@ var pcount = 0
 
 var ok chan int
 
+var statsCopied int
+var statsMoved int
+var statsSkipped int
+var statsNotExif int
+
 var flagFrom = flag.String("from", "", "Photos source directory.")
 var flagDest = flag.String("to", "", "Photos destination directory.")
-var flagMove = flag.Bool("move", false, "Delete original file after copying.")
-var flagDryRun = flag.Bool("dry-run", false, "Just prints what would be done without actually doing it.")
-var flagMaxProcs = flag.Int("max-procs", runtime.NumCPU(), "The maximum number of tasks run at the same time.")
+var flagMove = flag.Bool("move", false, "Delete original file after copying (move file).")
+var flagDryRun = flag.Bool("dry-run", false, "Prints what would be done without actually doing it.")
+var flagMaxProcs = flag.Int("max-procs", runtime.NumCPU(), "The maximum number of tasks running at the same time.")
 
 func verifyDirectory(name string) error {
 	stat, err := os.Stat(name)
@@ -171,11 +176,13 @@ func Import(name string, dest string) {
 					log.Printf("Moving file: %s -> %s\n", name, rename)
 					if *flagDryRun == false {
 						err = Move(name, rename)
+						statsMoved++
 					}
 				} else {
 					log.Printf("Copying file: %s -> %s\n", name, rename)
 					if *flagDryRun == false {
 						err = Copy(name, rename)
+						statsCopied++
 					}
 				}
 				if err != nil {
@@ -183,10 +190,15 @@ func Import(name string, dest string) {
 				}
 			} else {
 				log.Printf("Skipping file: %s\n", rename)
+				statsSkipped++
 			}
 
+		} else {
+			statsNotExif++
 		}
 
+	} else {
+		statsNotExif++
 	}
 
 }
@@ -246,8 +258,11 @@ func main() {
 	flag.Parse()
 
 	if *flagFrom == "" || *flagDest == "" {
-		fmt.Printf("Sample usage: phosphor -from /media/usb/DCIM -to ~/Photos -dry-run\n")
+		fmt.Printf("Photopy, by xiam <xiam@menteslibres.org> at Mexico City.\n\n")
+		fmt.Printf("A command line tool for importing photos.\n\n")
+		fmt.Printf("Sample usage:\n\n\tphotopy -from /media/usb/DCIM -to ~/Photos -dry-run\n\n")
 		flag.PrintDefaults()
+		fmt.Println("")
 	} else {
 		var err error
 
@@ -266,5 +281,12 @@ func main() {
 		}
 
 		Scandir(*flagFrom, *flagDest)
+
+		// Waiting for all tasks to finish
+		for i := 0; i < pcount; i++ {
+			<-ok
+		}
+
+		fmt.Printf("Copied: %d, Moved: %d, Skipped: %d, Without EXIF data: %d\n", statsCopied, statsMoved, statsSkipped, statsNotExif)
 	}
 }
