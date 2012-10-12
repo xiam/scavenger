@@ -47,6 +47,9 @@ const PS = string(os.PathSeparator)
 var dateTimeFields = []string{
 	"Date and Time (Original)",
 	"Date/Time Original",
+	"Media Create Date",
+	"Track Create Date",
+	"Create Date",
 }
 
 var pcount = 0
@@ -64,12 +67,23 @@ var flagMove = flag.Bool("move", false, "Delete original file after copying (mov
 var flagDryRun = flag.Bool("dry-run", false, "Prints what would be done without actually doing it.")
 var flagMaxProcs = flag.Int("max-procs", runtime.NumCPU(), "The maximum number of tasks running at the same time.")
 var flagExifTool = flag.Bool("exiftool", false, "Use exiftool instead of libexif (slower. requires exiftool to be installed).")
+var flagTryExifTool = flag.Bool("try-exiftool", false, "Fallback to exiftool if libexif fails (requires exiftool to be installed).")
 
 func getExifData(file string) (map[string]string, error) {
 	var err error
-	var tags map[string]string
 
-	if *flagExifTool == true {
+	if *flagExifTool == false || *flagTryExifTool == true {
+
+		ex := exif.New()
+		err = ex.Open(file)
+
+		if err == nil {
+			return ex.Tags, nil
+		}
+
+	}
+
+	if *flagExifTool == true || *flagTryExifTool == true {
 
 		cmd := exec.Command("exiftool", file)
 
@@ -82,7 +96,7 @@ func getExifData(file string) (map[string]string, error) {
 			return nil, err
 		}
 
-		tags = make(map[string]string)
+		tags := make(map[string]string)
 
 		data := strings.Trim(out.String(), " \r\n")
 		lines := strings.Split(data, "\n")
@@ -93,18 +107,10 @@ func getExifData(file string) (map[string]string, error) {
 			tags[key] = value
 		}
 
-	} else {
-		ex := exif.New()
-		err = ex.Open(file)
-
-		if err != nil {
-			return nil, err
-		}
-
-		tags = ex.Tags
+		return tags, nil
 	}
 
-	return tags, nil
+	return nil, fmt.Errorf("Could not read EXIF data.")
 }
 
 func verifyDirectory(name string) error {

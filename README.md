@@ -1,16 +1,17 @@
 # Photopy
 
-A command line tool for importing photos into a hierarchical directory structure.
+Photopy is a command line tool that imports media files into a nice directory layout.
 
 Example:
 
 ```
-photopy -from /media/UsbStick -to ~/Photos -max-procs 6 -dry-run
+photopy -from /media/UsbStick -to ~/Photos -max-procs 3 -dry-run -try-exiftool
 ```
 
-The directory structure is generated according to the creation date found in the image's EXIF data.
+The directory layout is guessed from the EXIF creation date. EXIF metadata is provided by `libexif`
+or `exiftool`.
 
-An imported set of photos would look like this:
+This is an example of how the final directory layout could look like:
 
 ```
 cd ~/Photos
@@ -19,7 +20,6 @@ find .
 ./2011
 ./2011/03-March
 ./2011/03-March/06-Sunday
-./2011/03-March/06-Sunday/084104-DC9A.jpg
 ./2011/03-March/06-Sunday/092033-ABC2.jpg
 ./2011/03-March/06-Sunday/092229-DC31.jpg
 ./2011/03-March/13-Sunday
@@ -39,6 +39,13 @@ go get github.com/xiam/photopy
 go install github.com/xiam/photopy
 photopy -help
 ```
+
+## Getting exiftool
+
+If you want `photopy` to be able to read metadata for almost any kind of file (not just photos)
+you'll need `exiftool`. Download and install it from http://owl.phy.queensu.ca/~phil/exiftool/
+
+`exiftool` is not required and is disabled by default.
 
 > Copyright (c) 2012 José Carlos Nieto, http://xiam.menteslibres.org/
 >
