@@ -24,6 +24,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto"
 	"flag"
 	"fmt"
@@ -33,6 +34,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path"
 	"regexp"
 	"runtime"
@@ -44,6 +46,7 @@ const PS = string(os.PathSeparator)
 
 var dateTimeFields = []string{
 	"Date and Time (Original)",
+	"Date/Time Original",
 }
 
 var pcount = 0
@@ -60,6 +63,49 @@ var flagDest = flag.String("to", "", "Photos destination directory.")
 var flagMove = flag.Bool("move", false, "Delete original file after copying (move file).")
 var flagDryRun = flag.Bool("dry-run", false, "Prints what would be done without actually doing it.")
 var flagMaxProcs = flag.Int("max-procs", runtime.NumCPU(), "The maximum number of tasks running at the same time.")
+var flagExifTool = flag.Bool("exiftool", false, "Use exiftool instead of libexif (slower. requires exiftool to be installed).")
+
+func getExifData(file string) (map[string]string, error) {
+	var err error
+	var tags map[string]string
+
+	if *flagExifTool == true {
+
+		cmd := exec.Command("exiftool", file)
+
+		var out bytes.Buffer
+		cmd.Stdout = &out
+
+		err := cmd.Run()
+
+		if err != nil {
+			return nil, err
+		}
+
+		tags = make(map[string]string)
+
+		data := strings.Trim(out.String(), " \r\n")
+		lines := strings.Split(data, "\n")
+
+		for _, line := range lines {
+			key := strings.Trim(line[0:32], " ")
+			value := strings.Trim(line[33:], " ")
+			tags[key] = value
+		}
+
+	} else {
+		ex := exif.New()
+		err = ex.Open(file)
+
+		if err != nil {
+			return nil, err
+		}
+
+		tags = ex.Tags
+	}
+
+	return tags, nil
+}
 
 func verifyDirectory(name string) error {
 	stat, err := os.Stat(name)
@@ -117,19 +163,17 @@ func Import(name string, dest string) {
 		ok <- 1
 	}()
 
-	ex := exif.New()
-
 	re, _ := regexp.Compile(`(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})`)
 
-	err := ex.Open(name)
+	tags, err := getExifData(name)
 
 	if err == nil {
 
 		var taken string
 
 		for _, field := range dateTimeFields {
-			if ex.Tags[field] != "" {
-				taken = ex.Tags[field]
+			if tags[field] != "" {
+				taken = tags[field]
 				break
 			}
 		}
@@ -258,7 +302,7 @@ func main() {
 	flag.Parse()
 
 	if *flagFrom == "" || *flagDest == "" {
-		fmt.Printf("Photopy, by xiam <xiam@menteslibres.org> at Mexico City.\n\n")
+		fmt.Printf("Photopy, by xiam <xiam@menteslibres.org>, Mexico City.\n\n")
 		fmt.Printf("A command line tool for importing photos.\n\n")
 		fmt.Printf("Sample usage:\n\n\tphotopy -from /media/usb/DCIM -to ~/Photos -dry-run\n\n")
 		flag.PrintDefaults()
