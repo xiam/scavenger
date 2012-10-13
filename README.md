@@ -36,7 +36,6 @@ find .
 
 ```
 go get github.com/xiam/photopy
-go install github.com/xiam/photopy
 photopy -help
 ```
 
