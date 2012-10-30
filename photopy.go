@@ -40,17 +40,10 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const PS = string(os.PathSeparator)
-
-var dateTimeFields = []string{
-	"Date and Time (Original)",
-	"Date/Time Original",
-	"Media Create Date",
-	"Track Create Date",
-	"Create Date",
-}
 
 var pcount = 0
 
@@ -61,9 +54,9 @@ var statsMoved int
 var statsSkipped int
 var statsNotExif int
 
-var flagFrom = flag.String("from", "", "Photos source directory.")
-var flagDest = flag.String("to", "", "Photos destination directory.")
-var flagMove = flag.Bool("move", false, "Delete original file after copying (move file).")
+var flagFrom = flag.String("from", "", "Media source directory.")
+var flagDest = flag.String("to", "", "Media destination directory.")
+var flagMove = flag.Bool("move", false, "Delete original file after copying (rename file).")
 var flagDryRun = flag.Bool("dry-run", false, "Prints what would be done without actually doing it.")
 var flagMaxProcs = flag.Int("max-procs", runtime.NumCPU(), "The maximum number of tasks running at the same time.")
 var flagExifTool = flag.Bool("exiftool", false, "Use exiftool instead of libexif (slower. requires exiftool to be installed).")
@@ -163,6 +156,63 @@ func Move(src string, dst string) error {
 	return nil
 }
 
+func textilize(input string) string {
+	var re *regexp.Regexp
+
+	sc := unicode.SpecialCase{}
+
+	output := strings.ToLowerSpecial(sc, input)
+
+	re, _ = regexp.Compile("[áäâãà]")
+	output = re.ReplaceAllLiteralString(output, "a")
+
+	re, _ = regexp.Compile("[éëêẽè]")
+	output = re.ReplaceAllLiteralString(output, "e")
+
+	re, _ = regexp.Compile("[íïîĩì]")
+	output = re.ReplaceAllLiteralString(output, "i")
+
+	re, _ = regexp.Compile("[óöôõò]")
+	output = re.ReplaceAllLiteralString(output, "o")
+
+	re, _ = regexp.Compile("[úüûũù]")
+	output = re.ReplaceAllLiteralString(output, "u")
+
+	re, _ = regexp.Compile("[ñ]")
+	output = re.ReplaceAllLiteralString(output, "n")
+
+	re, _ = regexp.Compile("[^a-z0-9]")
+	output = re.ReplaceAllLiteralString(output, " ")
+
+	re, _ = regexp.Compile(" +")
+	output = re.ReplaceAllLiteralString(output, " ")
+
+	output = strings.Replace(strings.TrimSpace(output), " ", "_", -1)
+
+	return output
+}
+
+func normalize(chunks ...string) string {
+	name := []string{}
+	for _, chunk := range chunks {
+		chunk = strings.Trim(chunk, "")
+		if chunk != "" {
+			name = append(name, textilize(chunk))
+		}
+	}
+	return strings.Join(name, "-")
+}
+
+func pick(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func Import(name string, dest string) {
 
 	defer func() {
@@ -175,16 +225,46 @@ func Import(name string, dest string) {
 
 	if err == nil {
 
-		var taken string
+		rename := ""
 
-		for _, field := range dateTimeFields {
-			if tags[field] != "" {
-				taken = tags[field]
-				break
+		switch tags["File Type"] {
+
+		case "MP3":
+
+			hash := checksum.File(name, crypto.SHA1)
+
+			rename = strings.Join(
+				[]string{
+					dest,
+					normalize(pick(tags["Artist"], "Unknown Artist")),
+					normalize(pick(tags["Album"], "Unknown Album")),
+					fmt.Sprintf("%s%s", normalize(tags["Track"], fmt.Sprintf("%s-%s", pick(tags["Title"], "Unknown Title"), hash[0:4])), pick(strings.ToLower(path.Ext(name)), ".mp3")),
+				},
+				PS,
+			)
+
+		default:
+			var taken string
+
+			dateTimeFields := []string{
+				"Date and Time (Original)",
+				"Date/Time Original",
+				"Media Create Date",
+				"Track Create Date",
+				"Create Date",
 			}
-		}
 
-		if taken != "" {
+			for _, field := range dateTimeFields {
+				if tags[field] != "" {
+					taken = tags[field]
+					break
+				}
+			}
+
+			if taken == "" {
+				statsNotExif++
+				return
+			}
 
 			all := re.FindAllStringSubmatch(taken, -1)
 
@@ -201,7 +281,7 @@ func Import(name string, dest string) {
 
 			hash := checksum.File(name, crypto.SHA1)
 
-			rename := strings.Join(
+			rename = strings.Join(
 				[]string{
 					dest,
 					to.String(timeTaken.Year()),
@@ -211,10 +291,14 @@ func Import(name string, dest string) {
 				},
 				PS,
 			)
+		}
+
+		if rename != "" {
 
 			_, err := os.Stat(rename)
 
 			if err != nil {
+
 				if *flagDryRun == false {
 					err = os.MkdirAll(path.Dir(rename), os.ModeDir|0750)
 					if err != nil {
@@ -238,6 +322,7 @@ func Import(name string, dest string) {
 				if err != nil {
 					panic(err)
 				}
+
 			} else {
 				log.Printf("Skipping file: %s\n", rename)
 				statsSkipped++
