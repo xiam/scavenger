@@ -52,6 +52,7 @@ var ok chan int
 var statsCopied int
 var statsMoved int
 var statsSkipped int
+var statsDeleted int
 var statsNotExif int
 
 var flagFrom = flag.String("from", "", "Media source directory.")
@@ -225,13 +226,12 @@ func Import(name string, dest string) {
 
 	if err == nil {
 
+		hash := checksum.File(name, crypto.SHA1)
 		rename := ""
 
 		switch tags["File Type"] {
 
 		case "MP3":
-
-			hash := checksum.File(name, crypto.SHA1)
 
 			rename = strings.Join(
 				[]string{
@@ -279,8 +279,6 @@ func Import(name string, dest string) {
 				time.UTC,
 			)
 
-			hash := checksum.File(name, crypto.SHA1)
-
 			rename = strings.Join(
 				[]string{
 					dest,
@@ -324,8 +322,16 @@ func Import(name string, dest string) {
 				}
 
 			} else {
-				log.Printf("Skipping file: %s\n", rename)
-				statsSkipped++
+				rehash := checksum.File(rename, crypto.SHA1)
+
+				if hash == rehash {
+					log.Printf("Destination already exists: %s, removing original: %s (same file).\n", rename, name)
+					os.Remove(name)
+					statsDeleted++
+				} else {
+					log.Printf("Destination already exists: %s, skipping original: %s (files differ).\n", rename, name)
+					statsSkipped++
+				}
 			}
 
 		} else {
@@ -422,6 +428,6 @@ func main() {
 			<-ok
 		}
 
-		fmt.Printf("Copied: %d, Moved: %d, Skipped: %d, Without EXIF data: %d\n", statsCopied, statsMoved, statsSkipped, statsNotExif)
+		fmt.Printf("Copied: %d, Moved: %d, Skipped: %d, Deleted: %d, Without EXIF data: %d\n", statsCopied, statsMoved, statsSkipped, statsDeleted, statsNotExif)
 	}
 }
