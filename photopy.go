@@ -269,12 +269,12 @@ func Import(name string, dest string) {
 			all := re.FindAllStringSubmatch(taken, -1)
 
 			timeTaken := time.Date(
-				to.Int(all[0][1]),
-				time.Month(to.Int(all[0][2])),
-				to.Int(all[0][3]),
-				to.Int(all[0][4]),
-				to.Int(all[0][5]),
-				to.Int(all[0][6]),
+				int(to.Int64(all[0][1])),
+				time.Month(int(to.Int64(all[0][2]))),
+				int(to.Int64(all[0][3])),
+				int(to.Int64(all[0][4])),
+				int(to.Int64(all[0][5])),
+				int(to.Int64(all[0][6])),
 				0,
 				time.UTC,
 			)
