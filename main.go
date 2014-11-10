@@ -1,25 +1,23 @@
-/*
-  Copyright (c) 2012 José Carlos Nieto, http://xiam.menteslibres.org/
-
-  Permission is hereby granted, free of charge, to any person obtaining
-  a copy of this software and associated documentation files (the
-  "Software"), to deal in the Software without restriction, including
-  without limitation the rights to use, copy, modify, merge, publish,
-  distribute, sublicense, and/or sell copies of the Software, and to
-  permit persons to whom the Software is furnished to do so, subject to
-  the following conditions:
-
-  The above copyright notice and this permission notice shall be
-  included in all copies or substantial portions of the Software.
-
-  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
-  LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+// Copyright (c) 2012-2014 José Carlos Nieto, https://menteslibres.net/xiam
+//
+// Permission is hereby granted, free of charge, to any person obtaining
+// a copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to
+// permit persons to whom the Software is furnished to do so, subject to
+// the following conditions:
+//
+// The above copyright notice and this permission notice shall be
+// included in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 package main
 
@@ -45,8 +43,8 @@ import (
 )
 
 const (
-	Ps = string(os.PathSeparator)
-	Fs = "-"
+	pathSeparator = string(os.PathSeparator)
+	fileSeparator = "-"
 )
 
 var pcount = 0
@@ -54,8 +52,9 @@ var pcount = 0
 var ok chan int
 
 var (
-	ErrUnknownFile   = errors.New(`Could not identify file using EXIF data.`)
-	ErrNotADirectory = errors.New(`%s: is not a directory.`)
+	ErrUnknownFile       = errors.New(`Could not identify file using EXIF data.`)
+	ErrNotADirectory     = errors.New(`%s: is not a directory.`)
+	ErrMissingCreateTime = errors.New(`Missing create time.`)
 )
 
 var (
@@ -90,6 +89,7 @@ var (
 	flagTryExifTool = flag.Bool("try-exiftool", false, "Fallback to exiftool if libexif fails (requires exiftool http://owl.phy.queensu.ca/~phil/exiftool/).")
 )
 
+// Attempts to retrieve EXIF data from a file.
 func getExifData(file string) (map[string]string, error) {
 	var err error
 
@@ -98,6 +98,7 @@ func getExifData(file string) (map[string]string, error) {
 		ex := exif.New()
 
 		err = ex.Open(file)
+
 		if err == nil {
 			return ex.Tags, nil
 		}
@@ -133,6 +134,7 @@ func getExifData(file string) (map[string]string, error) {
 	return nil, ErrUnknownFile
 }
 
+// Returns nil is the path is a directory.
 func verifyDirectory(dpath string) (err error) {
 	var stat os.FileInfo
 	if stat, err = os.Stat(dpath); err != nil {
@@ -144,6 +146,7 @@ func verifyDirectory(dpath string) (err error) {
 	return nil
 }
 
+// Copies a file into a new name.
 func copyFile(src string, dst string) (err error) {
 	var input *os.File
 	var output *os.File
@@ -163,11 +166,14 @@ func copyFile(src string, dst string) (err error) {
 	return err
 }
 
-func fileMove(src string, dst string) error {
+// Changes the name of the file.
+func moveFile(src string, dst string) error {
 	var err error
 
+	// Attempt to rename.
 	if err = os.Rename(src, dst); err != nil {
 
+		// If the file could not be renamed copy and remove it.
 		if err = copyFile(src, dst); err != nil {
 			return err
 		}
@@ -181,6 +187,7 @@ func fileMove(src string, dst string) error {
 	return nil
 }
 
+// Returns a normalized version of a string.
 func textilize(input string) string {
 	sc := unicode.SpecialCase{}
 
@@ -202,11 +209,12 @@ func textilize(input string) string {
 
 	output = reSpecialSpaces.ReplaceAllLiteralString(output, " ")
 
-	output = strings.Replace(strings.TrimSpace(output), " ", "_", -1)
+	output = strings.Replace(strings.TrimSpace(output), " ", fileSeparator, -1)
 
 	return output
 }
 
+// Returns a normalized version of the input slice of strings.
 func normalize(chunks ...string) string {
 	name := make([]string, 0, len(chunks))
 	for _, chunk := range chunks {
@@ -215,9 +223,10 @@ func normalize(chunks ...string) string {
 			name = append(name, textilize(chunk))
 		}
 	}
-	return strings.Join(name, Fs)
+	return strings.Join(name, fileSeparator)
 }
 
+// Returns the first non-empty value.
 func pick(values ...string) string {
 	for _, value := range values {
 		value = strings.TrimSpace(value)
@@ -228,175 +237,266 @@ func pick(values ...string) string {
 	return ""
 }
 
-func startImport(name string, dest string) {
+func getExifCreateDate(tags map[string]string) (time.Time, error) {
+	var taken string
+	var ok bool
+
+	// Looking for the first tag that sounds like a date.
+	dateTimeFields := []string{
+		"Date and Time (Original)",
+		"Date/Time Original",
+		"Create Date",
+	}
+
+	for _, field := range dateTimeFields {
+		if taken, ok = tags[field]; ok {
+			break
+		}
+	}
+
+	if taken == "" {
+		return time.Time{}, ErrMissingCreateTime
+	}
+
+	all := reDateTime.FindAllStringSubmatch(taken, -1)
+
+	t := time.Date(
+		int(to.Int64(all[0][1])),
+		time.Month(int(to.Int64(all[0][2]))),
+		int(to.Int64(all[0][3])),
+		int(to.Int64(all[0][4])),
+		int(to.Int64(all[0][5])),
+		int(to.Int64(all[0][6])),
+		0,
+		time.Local,
+	)
+
+	return t, nil
+}
+
+// File processor.
+func processFile(name string, dest string) {
+
+	var tags map[string]string
+	var err error
 
 	defer func() {
 		ok <- 1
 	}()
 
-	tags, err := getExifData(name)
+	if tags, err = getExifData(name); err != nil {
+		stats.unknown++
+		return
+	}
 
-	if err == nil {
+	hash := checksum.File(name, crypto.SHA1)
+	rename := ""
 
-		hash := checksum.File(name, crypto.SHA1)
-		rename := ""
+	// What kind of file is this?
 
-		switch tags["File Type"] {
+	if _, ok := tags["Track"]; ok {
+		// Is it a music file?
+		rename = strings.Join(
+			[]string{
+				dest,
+				normalize(pick(tags["Artist"], "Unknown Artist")),
+				normalize(pick(tags["Album"], "Unknown Album")),
+				fmt.Sprintf("%s%s", normalize(tags["Track"], fmt.Sprintf("%s-%s", pick(tags["Title"], "Unknown Title"), hash[0:8])), strings.ToLower(path.Ext(name))),
+			},
+			pathSeparator,
+		)
+		goto OK
+	}
 
-		case "MP3":
+	if _, ok := tags["Camera Model Name"]; ok {
+		// Is it a digital photo file?
+		var timeTaken time.Time
 
-			rename = strings.Join(
-				[]string{
-					dest,
-					normalize(pick(tags["Artist"], "Unknown Artist")),
-					normalize(pick(tags["Album"], "Unknown Album")),
-					fmt.Sprintf("%s%s", normalize(tags["Track"], fmt.Sprintf("%s-%s", pick(tags["Title"], "Unknown Title"), hash[0:4])), pick(strings.ToLower(path.Ext(name)), ".mp3")),
-				},
-				Ps,
-			)
-
-		default:
-			var taken string
-
-			dateTimeFields := []string{
-				"Date and Time (Original)",
-				"Date/Time Original",
-				"Media Create Date",
-				"Track Create Date",
-				"Create Date",
-			}
-
-			for _, field := range dateTimeFields {
-				if tags[field] != "" {
-					taken = tags[field]
-					break
-				}
-			}
-
-			if taken == "" {
-				stats.unknown++
-				return
-			}
-
-			all := reDateTime.FindAllStringSubmatch(taken, -1)
-
-			timeTaken := time.Date(
-				int(to.Int64(all[0][1])),
-				time.Month(int(to.Int64(all[0][2]))),
-				int(to.Int64(all[0][3])),
-				int(to.Int64(all[0][4])),
-				int(to.Int64(all[0][5])),
-				int(to.Int64(all[0][6])),
-				0,
-				time.UTC,
-			)
-
-			rename = strings.Join(
-				[]string{
-					dest,
-					to.String(timeTaken.Year()),
-					fmt.Sprintf("%02d-%s", timeTaken.Month(), timeTaken.Month()),
-					fmt.Sprintf("%02d-%s", timeTaken.Day(), timeTaken.Weekday()),
-					fmt.Sprintf("%02d%02d%02d-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:4]), strings.ToLower(path.Ext(name))),
-				},
-				Ps,
-			)
+		if timeTaken, err = getExifCreateDate(tags); err != nil {
+			stats.unknown++
+			return
 		}
 
-		if rename != "" {
+		rename = strings.Join(
+			[]string{
+				dest,
+				strings.ToUpper(normalize(tags["Camera Model Name"])),
+				strings.ToUpper(normalize(tags["File Type"])),
+				to.String(timeTaken.Year()),
+				fmt.Sprintf("%02d-%s", timeTaken.Month(), timeTaken.Month()),
+				fmt.Sprintf("%02d-%s", timeTaken.Day(), timeTaken.Weekday()),
+				fmt.Sprintf("%02d%02d%02d-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), strings.ToLower(path.Ext(name))),
+			},
+			pathSeparator,
+		)
+		goto OK
+	}
 
-			_, err := os.Stat(rename)
+	if _, ok := tags["Vendor ID"]; ok {
+		// Is a special file.
+		var timeTaken time.Time
 
-			if err != nil {
-
-				if *flagDryRun == false {
-					err = os.MkdirAll(path.Dir(rename), os.ModeDir|0750)
-					if err != nil {
-						panic(err)
-					}
-				}
-				err = nil
-				if *flagMove == true {
-					log.Printf("Moving file: %s -> %s\n", name, rename)
-					if *flagDryRun == false {
-						err = fileMove(name, rename)
-						stats.moved++
-					}
-				} else {
-					log.Printf("Copying file: %s -> %s\n", name, rename)
-					if *flagDryRun == false {
-						err = copyFile(name, rename)
-						stats.copied++
-					}
-				}
-				if err != nil {
-					panic(err)
-				}
-
-			} else {
-				rehash := checksum.File(rename, crypto.SHA1)
-
-				if hash == rehash {
-					log.Printf("Destination already exists: %s, removing original: %s (same file).\n", rename, name)
-					os.Remove(name)
-					stats.deleted++
-				} else {
-					log.Printf("Destination already exists: %s, skipping original: %s (files differ).\n", rename, name)
-					stats.skipped++
-				}
-			}
-
-		} else {
+		if timeTaken, err = getExifCreateDate(tags); err != nil {
 			stats.unknown++
+			return
+		}
+
+		rename = strings.Join(
+			[]string{
+				dest,
+				strings.ToUpper(normalize(tags["Vendor ID"])),
+				strings.ToUpper(normalize(tags["File Type"])),
+				to.String(timeTaken.Year()),
+				fmt.Sprintf("%02d-%s", timeTaken.Month(), timeTaken.Month()),
+				fmt.Sprintf("%02d-%s", timeTaken.Day(), timeTaken.Weekday()),
+				fmt.Sprintf("%02d%02d%02d-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), strings.ToLower(path.Ext(name))),
+			},
+			pathSeparator,
+		)
+		goto OK
+	}
+
+	// Unknown file.
+
+	/*
+		if _, ok := tags["File Type"]; ok {
+			// Is a regular file.
+			rename = strings.Join(
+				[]string{
+					dest,
+					strings.ToUpper(normalize(tags["File Type"])),
+					fmt.Sprintf("%s-%s", strings.ToUpper(hash[0:8]), path.Base(name)),
+				},
+				pathSeparator,
+			)
+			goto OK
+		}
+	*/
+
+	/*
+		rename = strings.Join(
+			[]string{
+				dest,
+				strings.ToUpper(path.Ext(name)),
+				fmt.Sprintf("%s%s", strings.ToUpper(hash[0:8]), strings.ToLower(path.Ext(name))),
+			},
+			pathSeparator,
+		)
+	*/
+
+OK:
+
+	if rename == "" {
+		stats.unknown++
+		return
+	}
+
+	_, err = os.Stat(rename)
+
+	if err == nil {
+		// A file with the same destination name already exists.
+
+		rehash := checksum.File(rename, crypto.SHA1)
+
+		if hash == rehash {
+			// Destination file is the same.
+			log.Printf("Destination already exists: %s, removing original: %s (same file).\n", rename, name)
+			// Remove original.
+			if *flagDryRun == false {
+				os.Remove(name)
+				stats.deleted++
+			}
+		} else {
+			// Destination file is different from source, don't know what to do,
+			// better skip it.
+			log.Printf("Destination already exists: %s, skipping original: %s (files differ).\n", rename, name)
+			stats.skipped++
 		}
 
 	} else {
-		stats.unknown++
+		// Preparing to create the new file.
+
+		if *flagDryRun == false {
+			if err = os.MkdirAll(path.Dir(rename), os.ModeDir|0750); err != nil {
+				panic(err)
+			}
+		}
+
+		if *flagMove == true {
+			// User wants to remove the original file.
+			log.Printf("Moving file: %s -> %s\n", name, rename)
+			if *flagDryRun == false {
+				if err = moveFile(name, rename); err != nil {
+					panic(err)
+				}
+				stats.moved++
+			}
+		} else {
+			// User wants to create a copy of the original file.
+			log.Printf("Copying file: %s -> %s\n", name, rename)
+			if *flagDryRun == false {
+				if err = copyFile(name, rename); err != nil {
+					panic(err)
+				}
+				stats.copied++
+			}
+		}
+
 	}
 
 }
 
-func scandir(dirname string, dest string) (err error) {
+func processDirectory(sourcedir string, destdir string) (err error) {
 
 	var stat os.FileInfo
-	var dh *os.File
 	var files []os.FileInfo
 
-	if stat, err = os.Stat(dirname); err != nil {
+	// Verifying source directory.
+	if stat, err = os.Stat(sourcedir); err != nil {
 		return err
 	}
 
 	if stat.IsDir() == false {
-		return fmt.Errorf(ErrNotADirectory.Error(), dirname)
+		return fmt.Errorf(ErrNotADirectory.Error(), sourcedir)
 	}
 
-	if dh, err = os.Open(dirname); err != nil {
+	// Verifying destination directory.
+	var dir *os.File
+	if dir, err = os.Open(sourcedir); err != nil {
 		return err
 	}
 
-	defer dh.Close()
+	defer dir.Close()
 
-	if files, err = dh.Readdir(-1); err != nil {
+	// Listing files in source directory.
+	if files, err = dir.Readdir(-1); err != nil {
 		return err
 	}
 
+	// File in directory.
 	for _, file := range files {
 
-		name := dirname + Ps + file.Name()
+		filepath := sourcedir + pathSeparator + file.Name()
 
 		if file.IsDir() == true {
 
-			scandir(name, dest)
+			// Recursive import.
+			processDirectory(filepath, destdir)
 
 		} else {
+
 			if pcount >= *flagMaxProcs {
 				// Waiting for one task to finish
 				<-ok
 				pcount--
 			}
-			go startImport(name, dest)
+
+			// Processing file.
+			go processFile(filepath, destdir)
+
 			// Task count
 			pcount++
+
 		}
 
 	}
@@ -409,35 +509,43 @@ func main() {
 	flag.Parse()
 
 	if *flagFrom == "" || *flagDest == "" {
-		fmt.Printf("Photoy, by J. Carlos Nieto.\n\n")
-		fmt.Printf("A command line tool for importing photos and media files.\n\n")
-		fmt.Printf("Sample usage:\n\n\tphotopy -from /media/usb/DCIM -to ~/Photos -dry-run\n\n")
+
+		// Not all requisites were met.
+
+		fmt.Printf("Photopy, by J. Carlos Nieto.\n\n")
+		fmt.Printf("A command line tool for importing photos and media files into a sane file layout.\n\n")
+		fmt.Printf("Sample usage:\n\n\tphotopy -from /Volumes/external -to ~/Photos -dry-run\n\n")
+
 		flag.PrintDefaults()
-		fmt.Println("")
+
+		fmt.Printf("\n")
+
 	} else {
 		var err error
 
 		ok = make(chan int, *flagMaxProcs)
 
-		err = verifyDirectory(*flagFrom)
-		if err != nil {
-			log.Println(err.Error())
+		// Verifying source directory.
+		if err = verifyDirectory(*flagFrom); err != nil {
+			log.Fatalf(err.Error())
 			return
 		}
 
-		err = verifyDirectory(*flagDest)
-		if err != nil {
-			log.Println(err.Error())
+		// Verifying destination directory.
+		if err = verifyDirectory(*flagDest); err != nil {
+			log.Fatalf(err.Error())
 			return
 		}
 
-		scandir(*flagFrom, *flagDest)
+		// Scanning
+		processDirectory(*flagFrom, *flagDest)
 
 		// Waiting for all tasks to finish
 		for i := 0; i < pcount; i++ {
 			<-ok
 		}
 
-		fmt.Printf("Copied: %d, Moved: %d, Skipped: %d, Deleted: %d, Without EXIF data: %d\n", stats.copied, stats.moved, stats.skipped, stats.deleted, stats.unknown)
+		// Execution summary.
+		log.Printf("Copied: %d, Moved: %d, Skipped: %d, Deleted: %d, Without EXIF data: %d\n", stats.copied, stats.moved, stats.skipped, stats.deleted, stats.unknown)
 	}
 }
