@@ -32,6 +32,7 @@ import (
 	"github.com/gosexy/to"
 	"io"
 	"log"
+	"mime"
 	"os"
 	"os/exec"
 	"path"
@@ -276,7 +277,7 @@ func getExifCreateDate(tags map[string]string) (time.Time, error) {
 
 // File processor.
 func processFile(name string, dest string) {
-
+	var cameraModel string
 	var tags map[string]string
 	var err error
 
@@ -287,6 +288,24 @@ func processFile(name string, dest string) {
 	if tags, err = getExifData(name); err != nil {
 		stats.unknown++
 		return
+	}
+
+	var fileExtension string
+	var fileType string
+	var mimeType string
+
+	fileExtension = strings.ToLower(path.Ext(name))
+
+	if tags["MIME Type"] != "" {
+		mimeType = tags["MIME Type"]
+	} else {
+		mimeType = mime.TypeByExtension(fileExtension)
+	}
+
+	mimeTypeParts := strings.Split(mimeType, "/")
+
+	if len(mimeTypeParts) > 0 {
+		fileType = strings.ToUpper(mimeTypeParts[0])
 	}
 
 	hash := checksum.File(name, crypto.SHA1)
@@ -301,14 +320,19 @@ func processFile(name string, dest string) {
 				dest,
 				normalize(pick(tags["Artist"], "Unknown Artist")),
 				normalize(pick(tags["Album"], "Unknown Album")),
-				fmt.Sprintf("%s%s", normalize(tags["Track"], fmt.Sprintf("%s-%s", pick(tags["Title"], "Unknown Title"), hash[0:8])), strings.ToLower(path.Ext(name))),
+				fmt.Sprintf("%s.%s%s", tags["Track"], normalize(fmt.Sprintf("%s-%s", pick(tags["Title"], "Unknown Title"), hash[0:8])), fileExtension),
 			},
 			pathSeparator,
 		)
 		goto OK
 	}
 
-	if _, ok := tags["Camera Model Name"]; ok {
+	cameraModel = pick(tags["Camera Model Name"], tags["Model"])
+
+	if cameraModel != "" {
+
+		cameraManufacturer := pick(tags["Manufacturer"], tags["Make"])
+
 		// Is it a digital photo file?
 		var timeTaken time.Time
 
@@ -320,12 +344,13 @@ func processFile(name string, dest string) {
 		rename = strings.Join(
 			[]string{
 				dest,
-				strings.ToUpper(normalize(tags["Camera Model Name"])),
-				strings.ToUpper(normalize(tags["File Type"])),
+				strings.ToUpper(normalize(cameraManufacturer)),
+				strings.ToUpper(normalize(cameraModel)),
+				fileType,
 				to.String(timeTaken.Year()),
-				fmt.Sprintf("%02d-%s", timeTaken.Month(), timeTaken.Month()),
-				fmt.Sprintf("%02d-%s", timeTaken.Day(), timeTaken.Weekday()),
-				fmt.Sprintf("%02d%02d%02d-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), strings.ToLower(path.Ext(name))),
+				fmt.Sprintf("%02d.%s", timeTaken.Month(), timeTaken.Month()),
+				fmt.Sprintf("%02d.%s", timeTaken.Day(), timeTaken.Weekday()),
+				fmt.Sprintf("%02d%02d%02d-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), fileExtension),
 			},
 			pathSeparator,
 		)
@@ -345,11 +370,11 @@ func processFile(name string, dest string) {
 			[]string{
 				dest,
 				strings.ToUpper(normalize(tags["Vendor ID"])),
-				strings.ToUpper(normalize(tags["File Type"])),
+				fileType,
 				to.String(timeTaken.Year()),
 				fmt.Sprintf("%02d-%s", timeTaken.Month(), timeTaken.Month()),
 				fmt.Sprintf("%02d-%s", timeTaken.Day(), timeTaken.Weekday()),
-				fmt.Sprintf("%02d%02d%02d-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), strings.ToLower(path.Ext(name))),
+				fmt.Sprintf("%02d%02d%02d-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), fileExtension),
 			},
 			pathSeparator,
 		)
@@ -364,7 +389,7 @@ func processFile(name string, dest string) {
 			rename = strings.Join(
 				[]string{
 					dest,
-					strings.ToUpper(normalize(tags["File Type"])),
+					strings.ToUpper(normalize(pick(path.Ext(name)))),
 					fmt.Sprintf("%s-%s", strings.ToUpper(hash[0:8]), path.Base(name)),
 				},
 				pathSeparator,
