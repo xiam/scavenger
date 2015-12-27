@@ -113,7 +113,7 @@ var restrictToExtensions map[string]bool
 var (
 	// A somewhat incomplete list of extensions.
 	knownTypes = map[string][]string{
-		"video":    []string{"mp4", "avi", "m4v"},
+		"video":    []string{"mp4", "avi", "m4v", "mov"},
 		"photo":    []string{"jpeg", "jpg", "raw"},
 		"music":    []string{"mp3", "wav"},
 		"document": []string{"pdf", "doc", "xls"},
@@ -350,6 +350,7 @@ func getExifCreateDate(tags map[string]string) (time.Time, error) {
 		"DateAndTimeOriginal",
 		"DateTimeOriginal",
 		"CreateDate",
+		"MediaCreateDate",
 		"TrackCreateDate",
 	}
 
@@ -490,8 +491,11 @@ func guessFileDestination(srcFile string, dstDir string) (dstFile string, err er
 
 	if otherTag != "" {
 		// Other file with EXIF data.
-
 		var timeTaken time.Time
+
+		if otherTag == "AR.Drone 2.0" {
+			otherTag = "Parrot AR.Drone"
+		}
 
 		if timeTaken, err = getExifCreateDate(tags); err != nil {
 			return
