@@ -43,7 +43,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/xiam/exif"
+	"github.com/rwcarlsen/goexif/exif"
+	"github.com/rwcarlsen/goexif/tiff"
 )
 
 var (
@@ -64,12 +65,21 @@ type task struct {
 	wg      *sync.WaitGroup
 }
 
+type tagsWalker struct {
+	v map[string]string
+}
+
+func (tw *tagsWalker) Walk(name exif.FieldName, tag *tiff.Tag) error {
+	tw.v[string(name)] = tag.String()
+	return nil
+}
+
 type token struct{}
 
 var tasks chan token
 
 var (
-	errUnknownFile       = errors.New(`Could not identify file using EXIF data`)
+	errUnknownFile       = errors.New(`Could not identify file using EXIF reader`)
 	errNotADirectory     = errors.New(`%s: is not a directory`)
 	errMissingCreateTime = errors.New(`Missing create time`)
 )
@@ -183,13 +193,19 @@ func fileHash(file string) (string, error) {
 
 // getExifData attempts to retrieve EXIF data from a file.
 func getExifData(file string) (map[string]string, error) {
-	var err error
-
 	if !*flagExifTool || *flagTryExifTool {
-		ex := exif.New()
-		err = ex.Open(file)
+		fp, err := os.Open(file)
+		if err != nil {
+			return nil, err
+		}
+		defer fp.Close()
+		ex, err := exif.Decode(fp)
 		if err == nil {
-			return ex.Tags, nil
+			tags := tagsWalker{make(map[string]string)}
+			if err = ex.Walk(&tags); err != nil {
+				return nil, err
+			}
+			return tags.v, nil
 		}
 	}
 
@@ -208,12 +224,11 @@ func getExifData(file string) (map[string]string, error) {
 		data := strings.Trim(out.String(), " \r\n")
 		lines := strings.Split(data, "\n")
 
-		var k, v string
 		for _, line := range lines {
-			k = strings.TrimSpace(line[0:32])
-			v = strings.TrimSpace(line[33:])
+			k, v := strings.Replace(strings.TrimSpace(line[0:32]), " ", "", -1), strings.TrimSpace(line[33:])
 			tags[k] = v
 		}
+
 		return tags, nil
 	}
 
@@ -332,10 +347,10 @@ func getExifCreateDate(tags map[string]string) (time.Time, error) {
 
 	// Looking for the first tag that sounds like a date.
 	dateTimeFields := []string{
-		"Date and Time (Original)",
-		"Date/Time Original",
-		"Create Date",
-		"Track Create Date",
+		"DateAndTimeOriginal",
+		"DateTimeOriginal",
+		"CreateDate",
+		"TrackCreateDate",
 	}
 
 	for _, field := range dateTimeFields {
@@ -372,8 +387,7 @@ func getExifCreateDate(tags map[string]string) (time.Time, error) {
 func guessFileDestination(srcFile string, dstDir string) (dstFile string, err error) {
 	var tags map[string]string
 
-	tags, err = getExifData(srcFile)
-	if err != nil {
+	if tags, err = getExifData(srcFile); err != nil {
 		if !*flagAcceptAll {
 			return "", err
 		}
@@ -384,8 +398,8 @@ func guessFileDestination(srcFile string, dstDir string) (dstFile string, err er
 
 	fileExtension := strings.ToLower(path.Ext(srcFile))
 
-	if tags["MIME Type"] != "" {
-		mimeType = tags["MIME Type"]
+	if tags["MIMEType"] != "" {
+		mimeType = tags["MIMEType"]
 	} else {
 		mimeType = mime.TypeByExtension(fileExtension)
 	}
@@ -418,7 +432,7 @@ func guessFileDestination(srcFile string, dstDir string) (dstFile string, err er
 		return
 	}
 
-	cameraModel := pick(tags["Camera Model Name"], tags["Model"])
+	cameraModel := pick(tags["CameraModelName"], tags["Model"])
 
 	if cameraModel != "" {
 		// Digital photo.
@@ -447,7 +461,7 @@ func guessFileDestination(srcFile string, dstDir string) (dstFile string, err er
 		return
 	}
 
-	if tags["Compressor Name"] == ".GoPro AVC encoder" {
+	if tags["CompressorName"] == ".GoPro AVC encoder" {
 		// GOPRO files.
 		cameraManufacturer := "GoPro"
 
@@ -472,7 +486,7 @@ func guessFileDestination(srcFile string, dstDir string) (dstFile string, err er
 		return
 	}
 
-	if _, ok := tags["Vendor ID"]; ok {
+	if _, ok := tags["VendorID"]; ok {
 		// Other file with EXIF data.
 
 		var timeTaken time.Time
