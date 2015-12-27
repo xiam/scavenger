@@ -27,8 +27,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/xiam/exif"
 	"io"
+	"io/ioutil"
 	"log"
 	"math"
 	"mime"
@@ -42,6 +42,8 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"github.com/xiam/exif"
 )
 
 var (
@@ -67,9 +69,9 @@ type token struct{}
 var tasks chan token
 
 var (
-	errUnknownFile       = errors.New(`Could not identify file using EXIF data.`)
-	errNotADirectory     = errors.New(`%s: is not a directory.`)
-	errMissingCreateTime = errors.New(`Missing create time.`)
+	errUnknownFile       = errors.New(`Could not identify file using EXIF data`)
+	errNotADirectory     = errors.New(`%s: is not a directory`)
+	errMissingCreateTime = errors.New(`Missing create time`)
 )
 
 var (
@@ -120,7 +122,31 @@ var (
 	flagExifTool       = flag.Bool("exiftool", false, "Use exiftool instead of libexif (slower. requires exiftool http://owl.phy.queensu.ca/~phil/exiftool/).")
 	flagTryExifTool    = flag.Bool("try-exiftool", false, "Fallback to exiftool if libexif fails (requires exiftool http://owl.phy.queensu.ca/~phil/exiftool/).")
 	flagAcceptAll      = flag.Bool("all", false, "Accept all kinds of files, including those that do not have EXIF data.")
+	flagAllowHidden    = flag.Bool("allow-hidden", false, "Accept hidden files.")
 )
+
+func restrictExtensions() {
+	restrictToExtensions = make(map[string]bool)
+
+	exs := strings.Split(*flagRestrict, ",")
+	for _, ex := range exs {
+		ex = strings.ToLower(strings.TrimSpace(ex))
+		if ex == "" {
+			continue
+		}
+		if len(knownTypes[ex]) > 0 {
+			for _, ex := range knownTypes[ex] {
+				restrictToExtensions["."+ex] = true
+			}
+			continue
+		} else {
+			if !strings.HasPrefix(ex, ".") {
+				ex = "." + ex
+			}
+			restrictToExtensions[ex] = true
+		}
+	}
+}
 
 // fileHash returns the SHA1 hash of the file.
 func fileHash(file string) (string, error) {
@@ -220,14 +246,17 @@ func copyFile(src string, dst string) error {
 	}
 	defer input.Close()
 
-	if output, err = os.Create(dst); err != nil {
+	if output, err = ioutil.TempFile(path.Dir(dst), ".tmp"); err != nil {
 		return err
 	}
-	defer output.Close()
 
-	_, err = io.Copy(output, input)
+	if _, err = io.Copy(output, input); err != nil {
+		output.Close()
+		return err
+	}
 
-	return err
+	output.Close()
+	return os.Rename(output.Name(), dst)
 }
 
 // moveFile moves a file from src to dst.
@@ -411,7 +440,7 @@ func guessFileDestination(srcFile string, dstDir string) (dstFile string, err er
 				strconv.Itoa(timeTaken.Year()),
 				fmt.Sprintf("%02d.%s", timeTaken.Month(), timeTaken.Month()),
 				fmt.Sprintf("%02d.%s", timeTaken.Day(), timeTaken.Weekday()),
-				fmt.Sprintf("%02dh%02dm%02ds-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), fileExtension),
+				fmt.Sprintf("%02d%02d%02d-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), fileExtension),
 			},
 			pathSeparator,
 		)
@@ -436,7 +465,7 @@ func guessFileDestination(srcFile string, dstDir string) (dstFile string, err er
 				strconv.Itoa(timeTaken.Year()),
 				fmt.Sprintf("%02d.%s", timeTaken.Month(), timeTaken.Month()),
 				fmt.Sprintf("%02d.%s", timeTaken.Day(), timeTaken.Weekday()),
-				fmt.Sprintf("%02dh%02dm%02ds-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), fileExtension),
+				fmt.Sprintf("%02d%02d%02d-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), fileExtension),
 			},
 			pathSeparator,
 		)
@@ -460,7 +489,7 @@ func guessFileDestination(srcFile string, dstDir string) (dstFile string, err er
 				strconv.Itoa(timeTaken.Year()),
 				fmt.Sprintf("%02d-%s", timeTaken.Month(), timeTaken.Month()),
 				fmt.Sprintf("%02d-%s", timeTaken.Day(), timeTaken.Weekday()),
-				fmt.Sprintf("%02dh%02dm%02ds-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), fileExtension),
+				fmt.Sprintf("%02d%02d%02d-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), fileExtension),
 			},
 			pathSeparator,
 		)
@@ -471,7 +500,7 @@ func guessFileDestination(srcFile string, dstDir string) (dstFile string, err er
 		[]string{
 			dstDir,
 			strings.ToUpper(normalize(pick(path.Ext(srcFile)))),
-			fmt.Sprintf("%s-%s", strings.ToUpper(hash[0:8]), path.Base(srcFile)),
+			strings.ToUpper(hash[0:8]) + path.Ext(srcFile),
 		},
 		pathSeparator,
 	)
@@ -480,7 +509,6 @@ func guessFileDestination(srcFile string, dstDir string) (dstFile string, err er
 
 // processFile moves a file from srcFile to dstDir using an special file srcFile.
 func processFile(srcFile string, dstDir string) error {
-
 	ex := strings.ToLower(path.Ext(srcFile))
 	if len(restrictToExtensions) > 0 {
 		if !restrictToExtensions[ex] {
@@ -514,12 +542,17 @@ func processFile(srcFile string, dstDir string) error {
 		if srcHash == dstHash {
 			// The hash of the destination file matches the original file's hash.
 			stats.Count(statDuplicatedFiles, 1)
-			if *flagDryRun {
-				log.Printf("Found duplicated files %q and %q, would remove source file.\n", dstFile, srcFile)
+			if *flagDeleteOriginal {
+				if *flagDryRun {
+					log.Printf("Found duplicated files %q and %q, would remove source file.\n", dstFile, srcFile)
+				} else {
+					log.Printf("Found duplicated files %q and %q, removing source file.\n", dstFile, srcFile)
+					os.Remove(srcFile)
+					stats.Count(statDeletedFiles, 1)
+				}
 			} else {
-				log.Printf("Found duplicated files %q and %q, removing source file.\n", dstFile, srcFile)
-				os.Remove(srcFile)
-				stats.Count(statDeletedFiles, 1)
+				stats.Count(statSkippedFiles, 1)
+				log.Printf("Found duplicated files %q and %q, skipping.\n", dstFile, srcFile)
 			}
 		} else {
 			// Destination file is different from source, don't know what to do, it
@@ -588,8 +621,14 @@ func processDirectory(srcDir string, dstDir string) error {
 		return err
 	}
 
+	var wg sync.WaitGroup
+
 	for _, file := range files {
 		srcFile := srcDir + pathSeparator + file.Name()
+		baseName := path.Base(srcFile)
+		if strings.HasPrefix(baseName, ".") && !*flagAllowHidden {
+			continue
+		}
 		if file.IsDir() {
 			if err := processDirectory(srcFile, dstDir); err != nil {
 				stats.Count(statErroredTasks, 1)
@@ -598,15 +637,23 @@ func processDirectory(srcDir string, dstDir string) error {
 		} else {
 			select {
 			case token := <-tasks:
-				err := processFile(srcFile, dstDir)
-				if err != nil {
-					stats.Count(statErroredTasks, 1)
-					errlog.Printf("Could not move %q into %q: %s", srcFile, dstDir, err.Error())
-				}
-				tasks <- token
+				wg.Add(1)
+				go func() {
+					defer func() {
+						wg.Done()
+						tasks <- token
+					}()
+					err := processFile(srcFile, dstDir)
+					if err != nil {
+						stats.Count(statErroredTasks, 1)
+						errlog.Printf("Could not move %q into %q: %s", srcFile, dstDir, err.Error())
+					}
+				}()
 			}
 		}
 	}
+
+	wg.Wait()
 
 	return nil
 }
@@ -622,26 +669,9 @@ func main() {
 		flag.PrintDefaults()
 		fmt.Println("")
 	} else {
-		restrictToExtensions = make(map[string]bool)
+		timeStart := time.Now()
 
-		exs := strings.Split(*flagRestrict, ",")
-		for _, ex := range exs {
-			ex = strings.ToLower(strings.TrimSpace(ex))
-			if ex == "" {
-				continue
-			}
-			if len(knownTypes[ex]) > 0 {
-				for _, ex := range knownTypes[ex] {
-					restrictToExtensions["."+ex] = true
-				}
-				continue
-			} else {
-				if !strings.HasPrefix(ex, ".") {
-					ex = "." + ex
-				}
-				restrictToExtensions[ex] = true
-			}
-		}
+		restrictExtensions()
 
 		var err error
 
@@ -666,8 +696,10 @@ func main() {
 		// Execution summary.
 		log.Println("")
 		log.Printf("Summary:\n")
+		log.Printf("\tTime taken: %v\n", time.Duration(time.Duration(int(time.Since(timeStart)/time.Second))*time.Second))
 		log.Printf("\tCopied files: %d\n", stats.Get(statCopiedFiles))
 		log.Printf("\tMoved files: %d\n", stats.Get(statMovedFiles))
+		log.Printf("\tDuplicated files: %d\n", stats.Get(statDuplicatedFiles))
 		log.Printf("\tSkipped files: %d\n", stats.Get(statSkippedFiles))
 		log.Printf("\tDeleted files: %d\n", stats.Get(statDeletedFiles))
 		log.Printf("\tUnknown files (no EXIF data): %d\n", stats.Get(statUnknownFiles))
