@@ -3,6 +3,10 @@
 Photopy is a command line tool that imports media files into a nice directory
 layout.
 
+```
+brew install libexif exiftool
+```
+
 Example:
 
 ```
