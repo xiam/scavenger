@@ -44,7 +44,10 @@ import (
 	"unicode"
 )
 
-var errlog = log.New(os.Stderr, "ERROR ", log.LstdFlags)
+var (
+	errlog   = log.New(os.Stderr, "ERROR ", log.LstdFlags)
+	debuglog = log.New(os.Stdout, "DEBUG ", log.LstdFlags)
+)
 
 const (
 	pathSeparator = string(os.PathSeparator)
@@ -93,7 +96,22 @@ const (
 	statErroredTasks
 )
 
+var restrictToExtensions map[string]bool
+
 var (
+	// A somewhat incomplete list of extensions.
+	knownTypes = map[string][]string{
+		"video":    []string{"mp4", "avi", "m4v"},
+		"photo":    []string{"jpeg", "jpg", "raw"},
+		"music":    []string{"mp3", "wav"},
+		"document": []string{"pdf", "doc", "xls"},
+	}
+)
+
+// photo, video, audio, document
+
+var (
+	flagRestrict       = flag.String("restrict", "", "Restrict files to certain extension (-restrict jpg,mp4,raw) or types (-restrict video,photo,music).")
 	flagFrom           = flag.String("source", "", "Scan for files on this directory (recursive).")
 	flagDest           = flag.String("destination", "", "Move files into this directory.")
 	flagDeleteOriginal = flag.Bool("delete-original", false, "Delete original file after copying it.")
@@ -101,6 +119,7 @@ var (
 	flagMaxProcs       = flag.Int("max-procs", runtime.NumCPU()*2, "The maximum number of tasks running at the same time.")
 	flagExifTool       = flag.Bool("exiftool", false, "Use exiftool instead of libexif (slower. requires exiftool http://owl.phy.queensu.ca/~phil/exiftool/).")
 	flagTryExifTool    = flag.Bool("try-exiftool", false, "Fallback to exiftool if libexif fails (requires exiftool http://owl.phy.queensu.ca/~phil/exiftool/).")
+	flagAcceptAll      = flag.Bool("all", false, "Accept all kinds of files, including those that do not have EXIF data.")
 )
 
 // fileHash returns the SHA1 hash of the file.
@@ -287,6 +306,7 @@ func getExifCreateDate(tags map[string]string) (time.Time, error) {
 		"Date and Time (Original)",
 		"Date/Time Original",
 		"Create Date",
+		"Track Create Date",
 	}
 
 	for _, field := range dateTimeFields {
@@ -323,8 +343,11 @@ func getExifCreateDate(tags map[string]string) (time.Time, error) {
 func guessFileDestination(srcFile string, dstDir string) (dstFile string, err error) {
 	var tags map[string]string
 
-	if tags, err = getExifData(srcFile); err != nil {
-		return "", errUnknownFile
+	tags, err = getExifData(srcFile)
+	if err != nil {
+		if !*flagAcceptAll {
+			return "", err
+		}
 	}
 
 	var fileType string
@@ -388,7 +411,32 @@ func guessFileDestination(srcFile string, dstDir string) (dstFile string, err er
 				strconv.Itoa(timeTaken.Year()),
 				fmt.Sprintf("%02d.%s", timeTaken.Month(), timeTaken.Month()),
 				fmt.Sprintf("%02d.%s", timeTaken.Day(), timeTaken.Weekday()),
-				fmt.Sprintf("%02d%02d%02d-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), fileExtension),
+				fmt.Sprintf("%02dh%02dm%02ds-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), fileExtension),
+			},
+			pathSeparator,
+		)
+		return
+	}
+
+	if tags["Compressor Name"] == ".GoPro AVC encoder" {
+		// GOPRO files.
+		cameraManufacturer := "GoPro"
+
+		var timeTaken time.Time
+
+		if timeTaken, err = getExifCreateDate(tags); err != nil {
+			return
+		}
+
+		dstFile = strings.Join(
+			[]string{
+				dstDir,
+				strings.ToUpper(normalize(cameraManufacturer)),
+				fileType,
+				strconv.Itoa(timeTaken.Year()),
+				fmt.Sprintf("%02d.%s", timeTaken.Month(), timeTaken.Month()),
+				fmt.Sprintf("%02d.%s", timeTaken.Day(), timeTaken.Weekday()),
+				fmt.Sprintf("%02dh%02dm%02ds-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), fileExtension),
 			},
 			pathSeparator,
 		)
@@ -412,46 +460,36 @@ func guessFileDestination(srcFile string, dstDir string) (dstFile string, err er
 				strconv.Itoa(timeTaken.Year()),
 				fmt.Sprintf("%02d-%s", timeTaken.Month(), timeTaken.Month()),
 				fmt.Sprintf("%02d-%s", timeTaken.Day(), timeTaken.Weekday()),
-				fmt.Sprintf("%02d%02d%02d-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), fileExtension),
+				fmt.Sprintf("%02dh%02dm%02ds-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), fileExtension),
 			},
 			pathSeparator,
 		)
 		return
 	}
 
-	return "", errUnknownFile
-
-	// Unknown file.
-
-	/*
-		if _, ok := tags["File Type"]; ok {
-			// Is a regular file.
-			dstFile = strings.Join(
-				[]string{
-					dstDir,
-					strings.ToUpper(normalize(pick(path.Ext(srcFile)))),
-					fmt.Sprintf("%s-%s", strings.ToUpper(hash[0:8]), path.Base(srcFile)),
-				},
-				pathSeparator,
-			)
-			goto OK
-		}
-	*/
-
-	/*
-		dstFile = strings.Join(
-			[]string{
-				dstDir,
-				strings.ToUpper(path.Ext(srcFile)),
-				fmt.Sprintf("%s%s", strings.ToUpper(hash[0:8]), strings.ToLower(path.Ext(srcFile))),
-			},
-			pathSeparator,
-		)
-	*/
+	dstFile = strings.Join(
+		[]string{
+			dstDir,
+			strings.ToUpper(normalize(pick(path.Ext(srcFile)))),
+			fmt.Sprintf("%s-%s", strings.ToUpper(hash[0:8]), path.Base(srcFile)),
+		},
+		pathSeparator,
+	)
+	return
 }
 
 // processFile moves a file from srcFile to dstDir using an special file srcFile.
 func processFile(srcFile string, dstDir string) error {
+
+	ex := strings.ToLower(path.Ext(srcFile))
+	if len(restrictToExtensions) > 0 {
+		if !restrictToExtensions[ex] {
+			debuglog.Printf("Skipping file %q", srcFile)
+			stats.Count(statSkippedFiles, 1)
+			return nil
+		}
+	}
+
 	dstFile, err := guessFileDestination(srcFile, dstDir)
 
 	if err != nil || dstFile == "" {
@@ -584,6 +622,27 @@ func main() {
 		flag.PrintDefaults()
 		fmt.Println("")
 	} else {
+		restrictToExtensions = make(map[string]bool)
+
+		exs := strings.Split(*flagRestrict, ",")
+		for _, ex := range exs {
+			ex = strings.ToLower(strings.TrimSpace(ex))
+			if ex == "" {
+				continue
+			}
+			if len(knownTypes[ex]) > 0 {
+				for _, ex := range knownTypes[ex] {
+					restrictToExtensions["."+ex] = true
+				}
+				continue
+			} else {
+				if !strings.HasPrefix(ex, ".") {
+					ex = "." + ex
+				}
+				restrictToExtensions[ex] = true
+			}
+		}
+
 		var err error
 
 		tasks = make(chan token, *flagMaxProcs)
