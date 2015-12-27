@@ -486,6 +486,28 @@ func guessFileDestination(srcFile string, dstDir string) (dstFile string, err er
 		return
 	}
 
+	if tags["SoftwareVersion"] == "" {
+		var timeTaken time.Time
+
+		if timeTaken, err = getExifCreateDate(tags); err != nil {
+			return
+		}
+
+		dstFile = strings.Join(
+			[]string{
+				dstDir,
+				strings.ToUpper(normalize(tags["SoftwareVersion"])),
+				fileType,
+				strconv.Itoa(timeTaken.Year()),
+				fmt.Sprintf("%02d.%s", timeTaken.Month(), timeTaken.Month()),
+				fmt.Sprintf("%02d.%s", timeTaken.Day(), timeTaken.Weekday()),
+				fmt.Sprintf("%02d%02d%02d-%s%s", timeTaken.Hour(), timeTaken.Minute(), timeTaken.Second(), strings.ToUpper(hash[0:8]), fileExtension),
+			},
+			pathSeparator,
+		)
+		return
+	}
+
 	if _, ok := tags["VendorID"]; ok {
 		// Other file with EXIF data.
 
