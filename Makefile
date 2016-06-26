@@ -6,10 +6,10 @@ MESSAGE             ?= Latest release.
 all: clean
 	@mkdir -p $(GOX_OUTPUT_DIR) && \
 	gox -osarch=$(GOX_OSARCH) -output "$(GOX_OUTPUT_DIR)/{{.Dir}}_{{.OS}}_{{.Arch}}" && \
-	gzip bin/scanvenger_darwin_* && \
-	gzip bin/scanvenger_freebsd_* && \
-	gzip bin/scanvenger_linux_* && \
-	zip -r bin/scanvenger_windows_386.zip bin/scanvenger_windows_386.exe
+	gzip bin/scavenger_darwin_* && \
+	gzip bin/scavenger_freebsd_* && \
+	gzip bin/scavenger_linux_* && \
+	zip -r bin/scavenger_windows_386.zip bin/scavenger_windows_386.exe
 
 require-version:
 	@if [[ -z "$$VERSION" ]]; then echo "Missing \$$VERSION"; exit 1; fi
@@ -22,7 +22,7 @@ release: require-version
 		"target_commitish": "$(git rev-parse --abbrev-ref HEAD)", \
 		"draft": false, \
 		"prerelease": false \
-	}' "https://api.github.com/repos/xiam/scanvenger/releases?access_token=$(GH_ACCESS_TOKEN)") && \
+	}' "https://api.github.com/repos/xiam/scavenger/releases?access_token=$(GH_ACCESS_TOKEN)") && \
 	\
 	UPLOAD_URL_TEMPLATE=$$(echo $$RESP | python -mjson.tool | grep upload_url | awk '{print $$2}' | sed s/,$$//g | sed s/'"'//g) && \
 	if [[ -z "$$UPLOAD_URL_TEMPLATE" ]]; then echo $$RESP; exit 1; fi && \
