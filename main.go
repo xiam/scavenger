@@ -1,4 +1,4 @@
-// Copyright (c) 2012-2014 José Carlos Nieto, https://menteslibres.net/xiam
+// Copyright (c) 2012-present José Carlos Nieto, https://menteslibres.net/xiam
 //
 // Permission is hereby granted, free of charge, to any person obtaining
 // a copy of this software and associated documentation files (the
@@ -578,23 +578,24 @@ func processFile(srcFile string, dstDir string) error {
 			stats.Count(statSkippedFiles, 1)
 			log.Printf("Found duplicated files %q and %q, skipping.\n", dstFile, srcFile)
 			return nil
-		} else {
-			if !*flagOverwrite {
-				// Destination file is different from source, don't know what to do, it
-				// would be safer to skip it.
-				log.Printf("Destination %q for source file %q already exists and it's not a duplicate.\n", dstFile, srcFile)
-				stats.Count(statSkippedFiles, 1)
+		}
 
-				return fmt.Errorf("Destination %q already exists.", dstFile)
-			}
-			if *flagDryRun {
-				log.Printf("Found bogus destination file %q, would remove it.\n", dstFile)
-			} else {
-				log.Printf("Found bogus destination file %q, removing it.\n", dstFile)
-				os.Remove(dstFile)
-				stats.Count(statDeletedFiles, 1)
-				stats.Count(statOverwrittenFiles, 1)
-			}
+		if !*flagOverwrite {
+			// Destination file is different from source, don't know what to do, it
+			// would be safer to skip it.
+			log.Printf("Destination %q for source file %q already exists and it's not a duplicate.\n", dstFile, srcFile)
+			stats.Count(statSkippedFiles, 1)
+
+			return fmt.Errorf("Destination %q already exists.", dstFile)
+		}
+
+		if *flagDryRun {
+			log.Printf("Found bogus destination file %q, would remove it.\n", dstFile)
+		} else {
+			log.Printf("Found bogus destination file %q, removing it.\n", dstFile)
+			os.Remove(dstFile)
+			stats.Count(statDeletedFiles, 1)
+			stats.Count(statOverwrittenFiles, 1)
 		}
 	}
 
