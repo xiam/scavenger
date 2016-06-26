@@ -697,9 +697,9 @@ func main() {
 	flag.Parse()
 
 	if *flagFrom == "" || *flagDest == "" {
-		fmt.Println("Photopy, by J. Carlos Nieto.")
+		fmt.Println("Scanvenger, by J. Carlos Nieto.")
 		fmt.Println("A command line tool for importing photos and media files into a sane file layout.\n")
-		fmt.Println("Sample usage:\n\n\tphotopy -source /Volumes/external -destination ~/Photos -dry-run\n")
+		fmt.Println("Sample usage:\n\n\tscavenger -source /Volumes/external -destination ~/Photos -dry-run\n")
 		flag.PrintDefaults()
 		fmt.Println("")
 	} else {
