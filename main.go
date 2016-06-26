@@ -104,6 +104,7 @@ const (
 	statDuplicatedFiles
 	statSkippedFiles
 	statCopiedFiles
+	statOverwrittenFiles
 	statMovedFiles
 	statErroredTasks
 )
@@ -113,19 +114,19 @@ var restrictToExtensions map[string]bool
 var (
 	// A somewhat incomplete list of extensions.
 	knownTypes = map[string][]string{
-		"video":    []string{"mp4", "avi", "m4v", "mov"},
-		"photo":    []string{"jpeg", "jpg", "raw"},
+		"video":    []string{"mp4", "avi", "m4v", "mov", "lrv", "mts"},
+		"photo":    []string{"jpeg", "jpg", "raw", "arw"},
+		"audio":    []string{"m4a", "waveform"},
 		"music":    []string{"mp3", "wav"},
 		"document": []string{"pdf", "doc", "xls"},
 	}
 )
 
-// photo, video, audio, document
-
 var (
 	flagRestrict       = flag.String("restrict", "", "Restrict files to certain extension (-restrict jpg,mp4,raw) or types (-restrict video,photo,music).")
 	flagFrom           = flag.String("source", "", "Scan for files on this directory (recursive).")
 	flagDest           = flag.String("destination", "", "Move files into this directory.")
+	flagOverwrite      = flag.Bool("o", false, "Overwrite destination, if exists.")
 	flagDeleteOriginal = flag.Bool("delete-original", false, "Delete original file after copying it.")
 	flagDryRun         = flag.Bool("dry-run", false, "Prints what would be done without actually doing it.")
 	flagMaxProcs       = flag.Int("max-procs", runtime.NumCPU()*2, "The maximum number of tasks running at the same time.")
@@ -349,6 +350,7 @@ func getExifCreateDate(tags map[string]string) (time.Time, error) {
 	dateTimeFields := []string{
 		"DateAndTimeOriginal",
 		"DateTimeOriginal",
+		"Date/TimeOriginal",
 		"CreateDate",
 		"MediaCreateDate",
 		"TrackCreateDate",
@@ -570,52 +572,63 @@ func processFile(srcFile string, dstDir string) error {
 					os.Remove(srcFile)
 					stats.Count(statDeletedFiles, 1)
 				}
-			} else {
-				stats.Count(statSkippedFiles, 1)
-				log.Printf("Found duplicated files %q and %q, skipping.\n", dstFile, srcFile)
+				return nil
 			}
-		} else {
-			// Destination file is different from source, don't know what to do, it
-			// would be safer to skip it.
-			log.Printf("Destination %q for source file %q already exists and it's not a duplicate.\n", dstFile, srcFile)
+
 			stats.Count(statSkippedFiles, 1)
-
-			return fmt.Errorf("Destination already exists.", dstFile, srcFile)
-		}
-	} else {
-
-		dstDir := path.Dir(dstFile)
-		if *flagDryRun {
-			log.Printf("Would create directory %q", dstDir)
+			log.Printf("Found duplicated files %q and %q, skipping.\n", dstFile, srcFile)
+			return nil
 		} else {
-			log.Printf("Creating directory %q", dstDir)
-			if err = os.MkdirAll(dstDir, os.ModeDir|0750); err != nil {
+			if !*flagOverwrite {
+				// Destination file is different from source, don't know what to do, it
+				// would be safer to skip it.
+				log.Printf("Destination %q for source file %q already exists and it's not a duplicate.\n", dstFile, srcFile)
+				stats.Count(statSkippedFiles, 1)
+
+				return fmt.Errorf("Destination %q already exists.", dstFile)
+			}
+			if *flagDryRun {
+				log.Printf("Found bogus destination file %q, would remove it.\n", dstFile)
+			} else {
+				log.Printf("Found bogus destination file %q, removing it.\n", dstFile)
+				os.Remove(dstFile)
+				stats.Count(statDeletedFiles, 1)
+				stats.Count(statOverwrittenFiles, 1)
+			}
+		}
+	}
+
+	dstDir = path.Dir(dstFile)
+	if *flagDryRun {
+		log.Printf("Would create directory %q", dstDir)
+	} else {
+		log.Printf("Creating directory %q", dstDir)
+		if err = os.MkdirAll(dstDir, os.ModeDir|0750); err != nil {
+			return err
+		}
+	}
+
+	if *flagDeleteOriginal {
+		// Move the file.
+		if *flagDryRun {
+			log.Printf("Would move file: %q -> %q\n", srcFile, dstFile)
+		} else {
+			log.Printf("Moving file: %q -> %q\n", srcFile, dstFile)
+			if err = moveFile(srcFile, dstFile); err != nil {
 				return err
 			}
+			stats.Count(statMovedFiles, 1)
 		}
-
-		if *flagDeleteOriginal {
-			// Move the file.
-			if *flagDryRun {
-				log.Printf("Would move file: %q -> %q\n", srcFile, dstFile)
-			} else {
-				log.Printf("Moving file: %q -> %q\n", srcFile, dstFile)
-				if err = moveFile(srcFile, dstFile); err != nil {
-					return err
-				}
-				stats.Count(statMovedFiles, 1)
-			}
+	} else {
+		// Just copy it.
+		if *flagDryRun {
+			log.Printf("Would copy file: %s -> %s\n", srcFile, dstFile)
 		} else {
-			// Just copy it.
-			if *flagDryRun {
-				log.Printf("Would copy file: %s -> %s\n", srcFile, dstFile)
-			} else {
-				log.Printf("Copying file: %s -> %s\n", srcFile, dstFile)
-				if err = copyFile(srcFile, dstFile); err != nil {
-					return err
-				}
-				stats.Count(statCopiedFiles, 1)
+			log.Printf("Copying file: %s -> %s\n", srcFile, dstFile)
+			if err = copyFile(srcFile, dstFile); err != nil {
+				return err
 			}
+			stats.Count(statCopiedFiles, 1)
 		}
 	}
 
@@ -721,6 +734,7 @@ func main() {
 		log.Printf("\tMoved files: %d\n", stats.Get(statMovedFiles))
 		log.Printf("\tDuplicated files: %d\n", stats.Get(statDuplicatedFiles))
 		log.Printf("\tSkipped files: %d\n", stats.Get(statSkippedFiles))
+		log.Printf("\tOverwritten files: %d\n", stats.Get(statOverwrittenFiles))
 		log.Printf("\tDeleted files: %d\n", stats.Get(statDeletedFiles))
 		log.Printf("\tUnknown files (no EXIF data): %d\n", stats.Get(statUnknownFiles))
 		log.Printf("\tErrors: %d\n", stats.Get(statErroredTasks))
