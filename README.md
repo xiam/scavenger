@@ -1,6 +1,6 @@
-# Photopy
+# Scanvenger
 
-Photopy is a command line tool that imports media files into a nice directory
+Scanvenger is a command line tool that imports media files into a nice directory
 layout.
 
 ```
@@ -10,7 +10,7 @@ brew install libexif exiftool
 Example:
 
 ```
-photopy -from /media/UsbStick -to ~/Photos -max-procs 3 -dry-run -try-exiftool
+scanvenger -from /media/UsbStick -to ~/Photos -max-procs 3 -dry-run -try-exiftool
 ```
 
 The directory layout is guessed from the EXIF creation date. EXIF metadata is
@@ -37,16 +37,16 @@ find .
 ...
 ```
 
-## Install photopy
+## Install scanvenger
 
 ```
-go get github.com/xiam/photopy
-photopy -help
+go get github.com/xiam/scanvenger
+scanvenger -help
 ```
 
 ## Getting exiftool
 
-If you want `photopy` to be able to read metadata for almost any kind of file
+If you want `scanvenger` to be able to read metadata for almost any kind of file
 (not just photos) you'll need `exiftool`. Download and install it from
 http://owl.phy.queensu.ca/~phil/exiftool/
 

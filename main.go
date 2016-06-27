@@ -151,8 +151,9 @@ var (
 	// This map is used to define what extensions to look for if the users wants
 	// "video" or "document".
 	knownTypes = map[string][]string{
-		"video":    []string{"mp4", "avi", "m4v", "mov"},
+		"video":    []string{"mp4", "avi", "m4v", "mov", "lrv", "mts"},
 		"photo":    []string{"jpeg", "jpg", "raw", "arw"},
+		"audio":    []string{"m4a", "waveform"},
 		"music":    []string{"mp3", "wav"},
 		"document": []string{"pdf", "doc", "xls"},
 	}
@@ -345,6 +346,7 @@ func getExifCreateDate(tags map[string]string) (time.Time, error) {
 	dateTimeFields := []string{
 		"DateAndTimeOriginal",
 		"DateTimeOriginal",
+		"Date/TimeOriginal",
 		"CreateDate",
 		"MediaCreateDate",
 		"TrackCreateDate",
@@ -550,7 +552,6 @@ func processFile(srcFile string, dstDir string, next chan bool) error {
 		// Process another file.
 		next <- true
 
-		// File is an exact duplicate.
 		stats.Count(statDuplicatedFiles, 1)
 
 		if *flagDeleteOriginal {
@@ -680,9 +681,9 @@ func main() {
 	flag.Parse()
 
 	if *flagFrom == "" || *flagDest == "" {
-		fmt.Println("Photopy, by J. Carlos Nieto.")
+		fmt.Println("Scanvenger, by J. Carlos Nieto.")
 		fmt.Println("A command line tool for importing photos and media files into a sane file layout.\n")
-		fmt.Println("Sample usage:\n\n\tphotopy -source /Volumes/external -destination ~/Photos -dry-run\n")
+		fmt.Println("Sample usage:\n\n\tscavenger -source /Volumes/external -destination ~/Photos -dry-run\n")
 		flag.PrintDefaults()
 		fmt.Println("")
 	} else {
