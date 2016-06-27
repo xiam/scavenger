@@ -49,6 +49,8 @@ var (
 	debuglog = log.New(os.Stdout, "DEBUG ", log.LstdFlags)
 )
 
+var reRenamedFile = regexp.MustCompile(`-\d{3}`)
+
 type fileLocker struct {
 	table    map[string]bool
 	watchers map[string][]chan bool
@@ -350,6 +352,7 @@ func getExifCreateDate(tags map[string]string) (time.Time, error) {
 		"CreateDate",
 		"MediaCreateDate",
 		"TrackCreateDate",
+		"ModifyDate",
 		"FileModificationDateTime",
 		"FileAccessDateTime",
 	}
@@ -477,7 +480,7 @@ func guessFileDestination(srcFile string, dstDir string) (string, error) {
 
 	dstParts = append(dstParts,
 		[]string{
-			"Other",
+			normalizeFilename("Other"),
 			normalizeFilename(pick(strings.ToUpper(path.Ext(srcFile)), "Unknown")),
 			fmt.Sprintf(namedFile, baseFile, fileExtension),
 		}...,
@@ -514,6 +517,7 @@ func processFile(srcFile string, dstDir string, next chan bool) error {
 
 	dstFileBase := path.Base(dstFile)
 	dstFileBase = dstFileBase[:len(dstFileBase)-len(dstFileExt)]
+	dstFileBase = reRenamedFile.ReplaceAllString(dstFileBase, "")
 
 	// Find a file suffix, if neccessary.
 	for i := 0; true; i++ {
